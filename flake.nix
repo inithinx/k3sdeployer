@@ -28,6 +28,12 @@
         else
           throw "Unsupported cloud provider: ${cloudProvider}";
 
+        # Define terranixConfiguration here so it's accessible throughout
+        terranixConfiguration = terranix.lib.terranixConfiguration {
+          inherit system;
+          modules = [ terranixConfig ];
+        };
+
         # Generate NixOS configurations per VM
         nixosConfigs = lib.listToAttrs (lib.imap1 (i: _: {
           name = "${hostnamePrefix}${toString i}";
@@ -43,22 +49,21 @@
         }) (lib.range 1 numVMs));
 
       in {
-        # Terranix configuration for Terraform
-        terranixConfiguration = terranix.lib.terranixConfiguration {
-          inherit system;
-          modules = [ terranixConfig ];
-        };
+        # Expose terranixConfiguration
+        inherit terranixConfiguration;
 
         # Nix apps for automation
         apps = {
           provision = {
             type = "app";
-            program = "${pkgs.writeScript "provision-${cloudProvider}" ''
+            program = let
+              terranixConfigFile = terranixConfiguration;  # References the outer terranixConfiguration
+            in "${pkgs.writeScript "provision-${cloudProvider}" ''
               #!/bin/sh
               set -e
               # Generate Terraform config
               mkdir -p tf
-              cp ${self.terranixConfiguration} tf/config.tf.json
+              cp ${terranixConfigFile} tf/config.tf.json
               cd tf
               # Initialize Terraform
               ${pkgs.terraform}/bin/terraform init
