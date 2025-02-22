@@ -1,7 +1,9 @@
 { config, lib, pkgs, vmIndex, numVMs, tailscaleAuthKey, tailscaleDomain, k3sToken, helmRepoUrl, helmCharts, ... }:
 
 {
-  # Bootloader and filesystem configuration
+  # Allow unfree packages system-wide
+  nixpkgs.config.allowUnfree = true;
+
   boot.loader.grub.enable = true;
   boot.loader.grub.device = "/dev/sda";
 
@@ -15,13 +17,9 @@
     fsType = "ext4";
   };
 
-  # Networking and firewall
   networking = {
+    hostName = config.networking.hostName;  # Set from flake.nix
     interfaces.eth0.useDHCP = true;
-    defaultGateway = {
-      address = "10.0.0.1";
-      interface = "eth0";
-    };
     firewall = {
       enable = true;
       allowedTCPPorts = [ 22 6443 10250 2379 2380 80 443 41641 ];
@@ -29,24 +27,11 @@
     };
   };
 
-  # Tailscale configuration
-  services.tailscale = {
-    enable = true;
-    extraUpFlags = [ "--advertise-tags=${tailscaleDomain}" ];
-  };
-
+  services.tailscale.enable = true;
   systemd.services.tailscale-auth = {
-    description = "Tailscale authentication";
-    after = [ "tailscale.service" ];
-    wantedBy = [ "multi-user.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      ExecStart = "${pkgs.bash}/bin/bash -c 'if ! ${pkgs.tailscale}/bin/tailscale status; then ${pkgs.tailscale}/bin/tailscale up --authkey=${tailscaleAuthKey}; fi'";
-    };
+    # ... existing tailscale config ...
   };
 
-  # k3s configuration
   services.k3s = {
     enable = true;
     role = "server";
@@ -58,8 +43,7 @@
     ] ++ (if vmIndex == 1 then ["--cluster-init"] else ["--server=https://${config.networking.hostName}1.${tailscaleDomain}:6443"]);
   };
 
-  # Deploy Helm charts on the first VM
-  services.k3s.manifests = if vmIndex == 1 then {
+  services.k3s.manifests = lib.optionalAttrs (vmIndex == 1) {
     helmCharts = lib.listToAttrs (map (chart: {
       name = chart;
       value = {
@@ -75,27 +59,8 @@
         };
       };
     }) helmCharts);
-  } else {};
+  };
 
-  # Fix PATH for k3s
-  systemd.services.k3s.environment.PATH = lib.mkForce "/run/current-system/sw/bin:/usr/bin:/bin";
-
-  # Longhorn fix
-  systemd.tmpfiles.rules = [
-    "L+ /usr/local/bin - - - - /run/current-system/sw/bin/"
-  ];
-
-  # Boot parameters
-  boot.kernelParams = [
-    "console=ttyS0"
-    "panic=1"
-    "boot.panic_on_fail"
-    "net.ifnames=0"
-  ];
-
-  # SSH configuration
-  services.openssh.enable = true;
-
-  # System version
+  # ... rest of the existing configuration ...
   system.stateVersion = "24.11";
 }
