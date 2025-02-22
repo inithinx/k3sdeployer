@@ -1,9 +1,7 @@
 { pkgs, terranix, lib, numVMs, vmShape, region, hostnamePrefix, blockDeviceSize }:
 {
-  variable = {
-    aws_access_key = {};
-    aws_secret_key = {};
-  };
+  variable.aws_access_key = {};
+  variable.aws_secret_key = {};
 
   provider.aws = {
     region = region;
@@ -16,66 +14,80 @@
   };
 
   resource.aws_internet_gateway.main = {
-    vpc_id = "\${resource.aws_vpc.main.id}";
+    vpc_id = "\${aws_vpc.main.id}";
   };
 
   resource.aws_subnet.main = {
-    vpc_id = "\${resource.aws_vpc.main.id}";
+    vpc_id = "\${aws_vpc.main.id}";
     cidr_block = "10.0.1.0/24";
     availability_zone = "${region}a";
   };
 
   resource.aws_security_group.main = {
-    vpc_id = "\${resource.aws_vpc.main.id}";
-    ingress = [
-      { from_port = 41641; to_port = 41641; protocol = "udp"; cidr_blocks = ["0.0.0.0/0"]; description = "Tailscale"; }
-      { from_port = 80; to_port = 80; protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"]; description = "HTTP"; }
-      { from_port = 443; to_port = 443; protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"]; description = "HTTPS"; }
-      { from_port = 53; to_port = 53; protocol = "udp"; cidr_blocks = ["0.0.0.0/0"]; description = "DNS"; }
-      { from_port = 53; to_port = 53; protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"]; description = "DNS"; }
-      { from_port = 6443; to_port = 6443; protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"]; description = "Kubernetes API"; }
-      { from_port = 10250; to_port = 10250; protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"]; description = "Kubelet"; }
-      { from_port = 2379; to_port = 2380; protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"]; description = "etcd"; }
-    ];
-    egress = [
-      { from_port = 0; to_port = 0; protocol = "-1"; cidr_blocks = ["0.0.0.0/0"]; }
-    ];
+    vpc_id = "\${aws_vpc.main.id}";
+    ingress = lib.genList (i: {
+      from_port = [
+        41641 80 443 53 53 6443 10250 2379
+      ].[i];
+      to_port = [
+        41641 80 443 53 53 6443 10250 2380
+      ].[i];
+      protocol = [
+        "udp" "tcp" "tcp" "udp" "tcp" "tcp" "tcp" "tcp"
+      ].[i];
+      cidr_blocks = ["0.0.0.0/0"];
+      description = [
+        "Tailscale" "HTTP" "HTTPS" "DNS" "DNS" 
+        "Kubernetes API" "Kubelet" "etcd"
+      ].[i];
+      ipv6_cidr_blocks = [];
+      prefix_list_ids = [];
+      security_groups = [];
+      self = false;
+    }) 8;
+
+    egress = [{
+      from_port = 0;
+      to_port = 0;
+      protocol = "-1";
+      cidr_blocks = ["0.0.0.0/0"];
+      ipv6_cidr_blocks = [];
+      prefix_list_ids = [];
+      security_groups = [];
+      self = false;
+    }];
   };
 
-  resource.aws_instance.vm = lib.listToAttrs (lib.imap1 (i: _: {
-    name = "vm${toString i}";
-    value = {
-      ami = "ami-0c55b159cbfafe1f0"; # Replace with an Alpine AMI for your region
-      instance_type = vmShape;
-      subnet_id = "\${resource.aws_subnet.main.id}";
-      vpc_security_group_ids = ["\${resource.aws_security_group.main.id}"];
-      associate_public_ip_address = true;
-      user_data = ''
-        #!/bin/sh
-        mkfs.ext4 /dev/sdb
-        mkdir -p /var/lib/longhorn
-        mount /dev/sdb /var/lib/longhorn
-      '';
-      tags = { Name = "${hostnamePrefix}${toString i}"; };
+  resource.aws_instance = lib.genAttrs (map (i: "vm${toString i}") (lib.range 1 numVMs)) (name: {
+    ami = "ami-0c55b159cbfafe1f0";
+    instance_type = vmShape;
+    subnet_id = "\${aws_subnet.main.id}";
+    vpc_security_group_ids = ["\${aws_security_group.main.id}"];
+    associate_public_ip_address = true;
+    user_data = pkgs.writeScript "userdata" ''
+      #!/bin/sh
+      mkfs.ext4 /dev/sdb
+      mkdir -p /var/lib/longhorn
+      mount /dev/sdb /var/lib/longhorn
+    '';
+    tags = {
+      Name = "${hostnamePrefix}${lib.strings.removePrefix "vm" name}";
     };
-  }) (lib.range 1 numVMs));
+  });
 
-  resource.aws_ebs_volume.data = lib.listToAttrs (lib.imap1 (i: _: {
-    name = "data${toString i}";
-    value = {
-      availability_zone = "\${resource.aws_instance.vm${toString i}.availability_zone}";
-      size = blockDeviceSize; # Use the provided size
-    };
-  }) (lib.range 1 numVMs));
+  resource.aws_ebs_volume = lib.genAttrs (map (i: "data${toString i}") (lib.range 1 numVMs)) (name: {
+    availability_zone = "\${aws_instance.vm${lib.strings.removePrefix "data" name}.availability_zone}";
+    size = blockDeviceSize;
+    type = "gp3";
+  });
 
-  resource.aws_volume_attachment.data = lib.listToAttrs (lib.imap1 (i: _: {
-    name = "data${toString i}";
-    value = {
-      device_name = "/dev/sdb";
-      volume_id = "\${resource.aws_ebs_volume.data${toString i}.id}";
-      instance_id = "\${resource.aws_instance.vm${toString i}.id}";
-    };
-  }) (lib.range 1 numVMs));
+  resource.aws_volume_attachment = lib.genAttrs (map (i: "attach${toString i}") (lib.range 1 numVMs)) (name: let
+    i = lib.strings.removePrefix "attach" name;
+  in {
+    device_name = "/dev/sdb";
+    volume_id = "\${aws_ebs_volume.data${i}.id}";
+    instance_id = "\${aws_instance.vm${i}.id}";
+  });
 
   output.vm_ips = {
     value = lib.genList (i: "\${aws_instance.vm${toString (i + 1)}.public_ip}") numVMs;
