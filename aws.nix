@@ -108,12 +108,14 @@
         to_port = 0;
         protocol = "-1";
         cidr_blocks = [ "0.0.0.0/0" ];
+        description = "Allow all outbound traffic"; # Add this line
         ipv6_cidr_blocks = [ ];
         prefix_list_ids = [ ];
         security_groups = [ ];
         self = false;
       }
     ];
+
   };
 
   resource.aws_instance = lib.genAttrs (map (i: "vm${toString i}") (lib.range 1 numVMs)) (name: {
