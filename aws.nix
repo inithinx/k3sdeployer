@@ -78,6 +78,6 @@
   }) (lib.range 1 numVMs));
 
   output.vm_ips = {
-    value = lib.mapAttrsToList (n: v: "\${${v.id}.public_ip}") (lib.filterAttrs (n: _: lib.hasPrefix "vm" n) (lib.getAttrs (lib.genList (i: "vm${toString (i + 1)}") numVMs) resource.aws_instance));
+    value = lib.genList (i: "\${aws_instance.vm${toString (i + 1)}.public_ip}") numVMs;
   };
 }
