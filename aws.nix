@@ -25,21 +25,24 @@
 
   resource.aws_security_group.main = {
     vpc_id = "\${aws_vpc.main.id}";
-    ingress = lib.genList (i: {
-      from_port = [
-        41641 80 443 53 53 6443 10250 2379
-      ].[i];
-      to_port = [
-        41641 80 443 53 53 6443 10250 2380
-      ].[i];
-      protocol = [
-        "udp" "tcp" "tcp" "udp" "tcp" "tcp" "tcp" "tcp"
-      ].[i];
+    ingress = lib.genList (i: let
+      ports = [
+        { from = 41641; to = 41641; proto = "udp"; desc = "Tailscale"; }
+        { from = 80; to = 80; proto = "tcp"; desc = "HTTP"; }
+        { from = 443; to = 443; proto = "tcp"; desc = "HTTPS"; }
+        { from = 53; to = 53; proto = "udp"; desc = "DNS"; }
+        { from = 53; to = 53; proto = "tcp"; desc = "DNS"; }
+        { from = 6443; to = 6443; proto = "tcp"; desc = "Kubernetes API"; }
+        { from = 10250; to = 10250; proto = "tcp"; desc = "Kubelet"; }
+        { from = 2379; to = 2380; proto = "tcp"; desc = "etcd"; }
+      ];
+      p = builtins.elemAt ports i;
+    in {
+      from_port = p.from;
+      to_port = p.to;
+      protocol = p.proto;
       cidr_blocks = ["0.0.0.0/0"];
-      description = [
-        "Tailscale" "HTTP" "HTTPS" "DNS" "DNS" 
-        "Kubernetes API" "Kubelet" "etcd"
-      ].[i];
+      description = p.desc;
       ipv6_cidr_blocks = [];
       prefix_list_ids = [];
       security_groups = [];
