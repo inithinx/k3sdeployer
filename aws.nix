@@ -7,8 +7,8 @@
 
   provider.aws = {
     region = region;
-    access_key = "var.aws_access_key";
-    secret_key = "var.aws_secret_key";
+    access_key = "\${var.aws_access_key}";
+    secret_key = "\${var.aws_secret_key}";
   };
 
   resource.aws_vpc.main = {
@@ -27,7 +27,7 @@
 
   resource.aws_security_group.main = {
     vpc_id = "\${aws_vpc.main.id}";
-    
+
     ingress = [
       {
         description = "Tailscale";
@@ -40,7 +40,6 @@
         security_groups = [];
         self = false;
       }
-      # ... (keep other ingress rules with same structure)
     ];
 
     egress = [
